@@ -70,13 +70,84 @@ echo "Qt 库路径: $QT_PREFIX/lib"
 # 设置 DYLD_LIBRARY_PATH 以帮助 macdeployqt 找到 Qt 框架
 export DYLD_LIBRARY_PATH="$QT_PREFIX/lib:$DYLD_LIBRARY_PATH"
 
-# 运行 macdeployqt，明确指定 Qt 路径
+# 运行 macdeployqt，明确指定 Qt 路径和所需模块
+# 注意：添加 -always-overwrite 确保正确部署所有依赖
 $MACDEPLOYQT ${BUILD_DIR}/${APP_NAME}.app \
     -verbose=2 \
-    -libpath="$QT_PREFIX/lib"
+    -libpath="$QT_PREFIX/lib" \
+    -always-overwrite
 
 if [ $? -ne 0 ]; then
     echo "警告: macdeployqt 报告了一些错误，但继续处理..."
+fi
+
+# 5.1 手动复制 QtDBus 框架（macdeployqt 有时会遗漏）
+echo "检查并复制 QtDBus 框架..."
+QTDBUS_SOURCE="$QT_PREFIX/lib/QtDBus.framework"
+QTDBUS_TARGET="${BUILD_DIR}/${APP_NAME}.app/Contents/Frameworks/QtDBus.framework"
+
+# 删除可能存在的符号链接或不完整的目录
+if [ -L "$QTDBUS_TARGET" ] || [ -d "$QTDBUS_TARGET" ]; then
+    echo "删除现有的 QtDBus..."
+    rm -rf "$QTDBUS_TARGET"
+fi
+
+if [ -d "$QTDBUS_SOURCE" ]; then
+    echo "复制 QtDBus 框架..."
+    
+    # 创建正确的框架结构
+    mkdir -p "$QTDBUS_TARGET/Versions/A"
+    
+    # 复制二进制文件
+    cp "$QTDBUS_SOURCE/Versions/A/QtDBus" "$QTDBUS_TARGET/Versions/A/QtDBus"
+    
+    # 复制资源文件（如果存在）
+    if [ -d "$QTDBUS_SOURCE/Versions/A/Resources" ]; then
+        cp -R "$QTDBUS_SOURCE/Versions/A/Resources" "$QTDBUS_TARGET/Versions/A/"
+    fi
+    
+    # 创建符号链接
+    cd "$QTDBUS_TARGET"
+    ln -s A Versions/Current
+    ln -s Versions/Current/QtDBus QtDBus
+    if [ -d "Versions/A/Resources" ]; then
+        ln -s Versions/Current/Resources Resources
+    fi
+    cd - > /dev/null
+    
+    # 修复 QtDBus 的 rpath
+    echo "修复 QtDBus 的依赖路径..."
+    install_name_tool -id "@rpath/QtDBus.framework/Versions/A/QtDBus" \
+        "$QTDBUS_TARGET/Versions/A/QtDBus" 2>/dev/null || true
+        
+    # 修复 QtDBus 对 QtCore 的引用
+    install_name_tool -change "$QT_PREFIX/lib/QtCore.framework/Versions/A/QtCore" \
+        "@rpath/QtCore.framework/Versions/A/QtCore" \
+        "$QTDBUS_TARGET/Versions/A/QtDBus" 2>/dev/null || true
+        
+    # 修复 QtDBus 对 QtDBus 自身的引用（可能存在）
+    install_name_tool -change "$QT_PREFIX/lib/QtDBus.framework/Versions/A/QtDBus" \
+        "@rpath/QtDBus.framework/Versions/A/QtDBus" \
+        "$QTDBUS_TARGET/Versions/A/QtDBus" 2>/dev/null || true
+    
+    # 复制 libdbus-1 动态库（QtDBus 依赖）
+    echo "复制 libdbus-1 库..."
+    LIBDBUS_SOURCE=$(otool -L "$QTDBUS_TARGET/Versions/A/QtDBus" | grep libdbus | awk '{print $1}')
+    if [ -n "$LIBDBUS_SOURCE" ] && [ -f "$LIBDBUS_SOURCE" ]; then
+        cp "$LIBDBUS_SOURCE" "${BUILD_DIR}/${APP_NAME}.app/Contents/Frameworks/"
+        LIBDBUS_NAME=$(basename "$LIBDBUS_SOURCE")
+        
+        # 修复 QtDBus 对 libdbus 的引用
+        install_name_tool -change "$LIBDBUS_SOURCE" \
+            "@rpath/$LIBDBUS_NAME" \
+            "$QTDBUS_TARGET/Versions/A/QtDBus" 2>/dev/null || true
+        
+        echo "✓ libdbus-1 已复制并修复"
+    fi
+        
+    echo "✓ QtDBus 框架已复制并修复"
+else
+    echo "警告: 未找到 QtDBus 源框架，继续..."
 fi
 
 # 6. 重新签名整个 bundle（macdeployqt 会修改文件，导致签名失效）
