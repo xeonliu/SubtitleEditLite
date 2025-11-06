@@ -11,8 +11,8 @@ env:
 
 jobs:
   build-macos:
-    name: Build macOS Universal
-    runs-on: macos-13  # 使用 Intel 机器来构建
+    name: Build macOS
+    runs-on: macos-13
     
     steps:
     - name: Checkout code
@@ -21,89 +21,29 @@ jobs:
     - name: Install Qt
       uses: jurplel/install-qt-action@v3
       with:
-        version: '6.7.*'
+        version: '6.6.*'
         host: 'mac'
         target: 'desktop'
         arch: 'clang_64'
-        modules: 'qtbase qttools'
         cache: true
     
-    - name: Configure and Build for x86_64 (Intel)
-      run: |
-        cmake -B build-x86_64 -S . \
-          -DCMAKE_BUILD_TYPE=Release \
-          -DCMAKE_OSX_ARCHITECTURES=x86_64 \
-          -DCMAKE_OSX_DEPLOYMENT_TARGET=10.15 \
-          -DCMAKE_PREFIX_PATH=$Qt6_DIR
-        cmake --build build-x86_64 --config Release
+    - name: Make package script executable
+      run: chmod +x package_macos.sh
     
-    - name: Configure and Build for arm64 (Apple Silicon)
-      run: |
-        cmake -B build-arm64 -S . \
-          -DCMAKE_BUILD_TYPE=Release \
-          -DCMAKE_OSX_ARCHITECTURES=arm64 \
-          -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0 \
-          -DCMAKE_PREFIX_PATH=$Qt6_DIR
-        cmake --build build-arm64 --config Release
-    
-    - name: Create Universal Binary
-      run: |
-        # 创建目标目录
-        mkdir -p build-universal/${{ env.APP_NAME }}.app/Contents/MacOS
-        
-        # 复制 app 结构（从 x86_64 版本）
-        cp -R build-x86_64/${{ env.APP_NAME }}.app/* build-universal/${{ env.APP_NAME }}.app/
-        
-        # 使用 lipo 合并二进制文件
-        lipo -create \
-          build-x86_64/${{ env.APP_NAME }}.app/Contents/MacOS/${{ env.APP_NAME }} \
-          build-arm64/${{ env.APP_NAME }}.app/Contents/MacOS/${{ env.APP_NAME }} \
-          -output build-universal/${{ env.APP_NAME }}.app/Contents/MacOS/${{ env.APP_NAME }}
-        
-        # 验证 Universal Binary
-        echo "=== Universal Binary Info ==="
-        lipo -info build-universal/${{ env.APP_NAME }}.app/Contents/MacOS/${{ env.APP_NAME }}
-        file build-universal/${{ env.APP_NAME }}.app/Contents/MacOS/${{ env.APP_NAME }}
-    
-    - name: Deploy Qt dependencies
-      run: |
-        # 使用 macdeployqt 部署 Qt 框架
-        macdeployqt build-universal/${{ env.APP_NAME }}.app -always-overwrite -verbose=2
-        
-        # 手动复制 QtDBus（macdeployqt 经常遗漏这个）
-        QTDBUS_SOURCE="$Qt6_DIR/lib/QtDBus.framework"
-        QTDBUS_TARGET="build-universal/${{ env.APP_NAME }}.app/Contents/Frameworks/QtDBus.framework"
-        
-        if [ -d "$QTDBUS_SOURCE" ] && [ ! -d "$QTDBUS_TARGET" ]; then
-          echo "手动复制 QtDBus 框架..."
-          cp -R "$QTDBUS_SOURCE" "$QTDBUS_TARGET"
-          
-          # 修复依赖路径
-          install_name_tool -id "@rpath/QtDBus.framework/Versions/A/QtDBus" \
-            "$QTDBUS_TARGET/Versions/A/QtDBus" || true
-          install_name_tool -change "$Qt6_DIR/lib/QtCore.framework/Versions/A/QtCore" \
-            "@rpath/QtCore.framework/Versions/A/QtCore" \
-            "$QTDBUS_TARGET/Versions/A/QtDBus" || true
-        fi
-        
-        # 重新签名（包含新添加的框架）
-        codesign --force --deep --sign - build-universal/${{ env.APP_NAME }}.app
-        
-        # 创建 DMG
-        macdeployqt build-universal/${{ env.APP_NAME }}.app -dmg
-        mv build-universal/${{ env.APP_NAME }}.dmg ${{ env.APP_NAME }}-macOS-Universal.dmg
+    - name: Build and package using local script
+      run: ./package_macos.sh
     
     - name: Upload artifact
       uses: actions/upload-artifact@v4
       with:
-        name: macos-universal-dmg
-        path: ${{ env.APP_NAME }}-macOS-Universal.dmg
+        name: macos-dmg
+        path: SubtitleEditApp-*-macOS.dmg
     
     - name: Upload to release
       if: startsWith(github.ref, 'refs/tags/')
       uses: softprops/action-gh-release@v1
       with:
-        files: ${{ env.APP_NAME }}-macOS-Universal.dmg
+        files: SubtitleEditApp-*-macOS.dmg
         token: ${{ secrets.GITHUB_TOKEN }}
 
   build-windows:
@@ -117,93 +57,29 @@ jobs:
     - name: Install Qt
       uses: jurplel/install-qt-action@v3
       with:
-        version: '6.7.*'
+        version: '6.6.*'
         host: 'windows'
         target: 'desktop'
         arch: 'win64_msvc2019_64'
-        modules: 'qtbase qttools'
         cache: true
     
     - name: Setup MSVC
       uses: microsoft/setup-msbuild@v1.3
     
-    - name: Configure CMake
-      run: |
-        cmake -B build -S . `
-          -DCMAKE_BUILD_TYPE=Release `
-          -DCMAKE_PREFIX_PATH="${env:Qt6_DIR}"
-    
-    - name: Build
-      run: cmake --build build --config Release
-    
-    - name: Deploy Qt dependencies
-      run: |
-        mkdir deploy
-        Copy-Item build/Release/${{ env.APP_NAME }}.exe deploy/
-        windeployqt deploy/${{ env.APP_NAME }}.exe
-    
-    - name: Create installer with NSIS
-      run: |
-        # 创建简单的安装脚本
-        $nsisScript = @"
-        !include "MUI2.nsh"
-        
-        Name "${{ env.APP_NAME }}"
-        OutFile "${{ env.APP_NAME }}-Windows-Setup.exe"
-        InstallDir "`$PROGRAMFILES64\${{ env.APP_NAME }}"
-        RequestExecutionLevel admin
-        
-        !insertmacro MUI_PAGE_DIRECTORY
-        !insertmacro MUI_PAGE_INSTFILES
-        !insertmacro MUI_LANGUAGE "English"
-        
-        Section "Install"
-          SetOutPath "`$INSTDIR"
-          File /r "deploy\*.*"
-          CreateShortcut "`$DESKTOP\${{ env.APP_NAME }}.lnk" "`$INSTDIR\${{ env.APP_NAME }}.exe"
-          CreateDirectory "`$SMPROGRAMS\${{ env.APP_NAME }}"
-          CreateShortcut "`$SMPROGRAMS\${{ env.APP_NAME }}\${{ env.APP_NAME }}.lnk" "`$INSTDIR\${{ env.APP_NAME }}.exe"
-          WriteUninstaller "`$INSTDIR\Uninstall.exe"
-        SectionEnd
-        
-        Section "Uninstall"
-          Delete "`$INSTDIR\*.*"
-          RMDir /r "`$INSTDIR"
-          Delete "`$DESKTOP\${{ env.APP_NAME }}.lnk"
-          RMDir /r "`$SMPROGRAMS\${{ env.APP_NAME }}"
-        SectionEnd
-        "@
-        Set-Content -Path installer.nsi -Value $nsisScript
-        
-        # 安装 NSIS
-        choco install nsis -y
-        
-        # 构建安装程序
-        & "C:\Program Files (x86)\NSIS\makensis.exe" installer.nsi
-    
-    - name: Create portable ZIP
-      run: |
-        Compress-Archive -Path deploy\* -DestinationPath ${{ env.APP_NAME }}-Windows-Portable.zip
-    
-    - name: Upload installer artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: windows-installer
-        path: ${{ env.APP_NAME }}-Windows-Setup.exe
+    - name: Build and package using local script
+      run: .\package_windows.bat
     
     - name: Upload portable artifact
       uses: actions/upload-artifact@v4
       with:
         name: windows-portable
-        path: ${{ env.APP_NAME }}-Windows-Portable.zip
+        path: SubtitleEditApp-*-Windows-Portable.zip
     
     - name: Upload to release
       if: startsWith(github.ref, 'refs/tags/')
       uses: softprops/action-gh-release@v1
       with:
-        files: |
-          ${{ env.APP_NAME }}-Windows-Setup.exe
-          ${{ env.APP_NAME }}-Windows-Portable.zip
+        files: SubtitleEditApp-*-Windows-Portable.zip
         token: ${{ secrets.GITHUB_TOKEN }}
 
   build-linux:
@@ -217,11 +93,10 @@ jobs:
     - name: Install Qt
       uses: jurplel/install-qt-action@v3
       with:
-        version: '6.7.*'
+        version: '6.6.*'
         host: 'linux'
         target: 'desktop'
         arch: 'gcc_64'
-        modules: 'qtbase qttools'
         cache: true
     
     - name: Install dependencies
@@ -231,19 +106,16 @@ jobs:
           libxcb-image0 libxcb-keysyms1 libxcb-render-util0 libxcb-xinerama0 \
           libfuse2 file
     
-    - name: Configure CMake
+    - name: Build
       run: |
         cmake -B build -S . \
           -DCMAKE_BUILD_TYPE=Release \
           -DCMAKE_INSTALL_PREFIX=/usr \
           -DCMAKE_PREFIX_PATH=$Qt6_DIR
-    
-    - name: Build
-      run: cmake --build build --config Release
+        cmake --build build --config Release
     
     - name: Install to AppDir
-      run: |
-        cmake --install build --prefix AppDir/usr
+      run: cmake --install build --prefix AppDir/usr
     
     - name: Download linuxdeploy
       run: |
