@@ -1,0 +1,223 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'  # 触发条件：推送版本标签，如 v1.0.0
+  workflow_dispatch:  # 允许手动触发
+
+env:
+  APP_NAME: SubtitleEditApp
+
+jobs:
+  build-macos:
+    name: Build macOS
+    runs-on: macos-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Install Qt
+      uses: jurplel/install-qt-action@v3
+      with:
+        version: '6.7.*'
+        host: 'mac'
+        target: 'desktop'
+        arch: 'clang_64'
+        modules: 'qtbase qttools'
+        cache: true
+    
+    - name: Configure CMake
+      run: |
+        cmake -B build -S . \
+          -DCMAKE_BUILD_TYPE=Release \
+          -DCMAKE_OSX_DEPLOYMENT_TARGET=10.15 \
+          -DCMAKE_PREFIX_PATH=$Qt6_DIR
+    
+    - name: Build
+      run: cmake --build build --config Release
+    
+    - name: Deploy Qt dependencies
+      run: |
+        macdeployqt build/${{ env.APP_NAME }}.app -dmg
+        mv build/${{ env.APP_NAME }}.dmg ${{ env.APP_NAME }}-macOS.dmg
+    
+    - name: Upload artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: macos-dmg
+        path: ${{ env.APP_NAME }}-macOS.dmg
+    
+    - name: Upload to release
+      if: startsWith(github.ref, 'refs/tags/')
+      uses: softprops/action-gh-release@v1
+      with:
+        files: ${{ env.APP_NAME }}-macOS.dmg
+        token: ${{ secrets.GITHUB_TOKEN }}
+
+  build-windows:
+    name: Build Windows
+    runs-on: windows-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Install Qt
+      uses: jurplel/install-qt-action@v3
+      with:
+        version: '6.7.*'
+        host: 'windows'
+        target: 'desktop'
+        arch: 'win64_msvc2019_64'
+        modules: 'qtbase qttools'
+        cache: true
+    
+    - name: Setup MSVC
+      uses: microsoft/setup-msbuild@v1.3
+    
+    - name: Configure CMake
+      run: |
+        cmake -B build -S . `
+          -DCMAKE_BUILD_TYPE=Release `
+          -DCMAKE_PREFIX_PATH="${env:Qt6_DIR}"
+    
+    - name: Build
+      run: cmake --build build --config Release
+    
+    - name: Deploy Qt dependencies
+      run: |
+        mkdir deploy
+        Copy-Item build/Release/${{ env.APP_NAME }}.exe deploy/
+        windeployqt deploy/${{ env.APP_NAME }}.exe
+    
+    - name: Create installer with NSIS
+      run: |
+        # 创建简单的安装脚本
+        $nsisScript = @"
+        !include "MUI2.nsh"
+        
+        Name "${{ env.APP_NAME }}"
+        OutFile "${{ env.APP_NAME }}-Windows-Setup.exe"
+        InstallDir "`$PROGRAMFILES64\${{ env.APP_NAME }}"
+        RequestExecutionLevel admin
+        
+        !insertmacro MUI_PAGE_DIRECTORY
+        !insertmacro MUI_PAGE_INSTFILES
+        !insertmacro MUI_LANGUAGE "English"
+        
+        Section "Install"
+          SetOutPath "`$INSTDIR"
+          File /r "deploy\*.*"
+          CreateShortcut "`$DESKTOP\${{ env.APP_NAME }}.lnk" "`$INSTDIR\${{ env.APP_NAME }}.exe"
+          CreateDirectory "`$SMPROGRAMS\${{ env.APP_NAME }}"
+          CreateShortcut "`$SMPROGRAMS\${{ env.APP_NAME }}\${{ env.APP_NAME }}.lnk" "`$INSTDIR\${{ env.APP_NAME }}.exe"
+          WriteUninstaller "`$INSTDIR\Uninstall.exe"
+        SectionEnd
+        
+        Section "Uninstall"
+          Delete "`$INSTDIR\*.*"
+          RMDir /r "`$INSTDIR"
+          Delete "`$DESKTOP\${{ env.APP_NAME }}.lnk"
+          RMDir /r "`$SMPROGRAMS\${{ env.APP_NAME }}"
+        SectionEnd
+        "@
+        Set-Content -Path installer.nsi -Value $nsisScript
+        
+        # 安装 NSIS
+        choco install nsis -y
+        
+        # 构建安装程序
+        & "C:\Program Files (x86)\NSIS\makensis.exe" installer.nsi
+    
+    - name: Create portable ZIP
+      run: |
+        Compress-Archive -Path deploy\* -DestinationPath ${{ env.APP_NAME }}-Windows-Portable.zip
+    
+    - name: Upload installer artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: windows-installer
+        path: ${{ env.APP_NAME }}-Windows-Setup.exe
+    
+    - name: Upload portable artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: windows-portable
+        path: ${{ env.APP_NAME }}-Windows-Portable.zip
+    
+    - name: Upload to release
+      if: startsWith(github.ref, 'refs/tags/')
+      uses: softprops/action-gh-release@v1
+      with:
+        files: |
+          ${{ env.APP_NAME }}-Windows-Setup.exe
+          ${{ env.APP_NAME }}-Windows-Portable.zip
+        token: ${{ secrets.GITHUB_TOKEN }}
+
+  build-linux:
+    name: Build Linux (AppImage)
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Install Qt
+      uses: jurplel/install-qt-action@v3
+      with:
+        version: '6.7.*'
+        host: 'linux'
+        target: 'desktop'
+        arch: 'gcc_64'
+        modules: 'qtbase qttools'
+        cache: true
+    
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y libgl1-mesa-dev libxkbcommon-x11-0 libxcb-icccm4 \
+          libxcb-image0 libxcb-keysyms1 libxcb-render-util0 libxcb-xinerama0 \
+          libfuse2 file
+    
+    - name: Configure CMake
+      run: |
+        cmake -B build -S . \
+          -DCMAKE_BUILD_TYPE=Release \
+          -DCMAKE_INSTALL_PREFIX=/usr \
+          -DCMAKE_PREFIX_PATH=$Qt6_DIR
+    
+    - name: Build
+      run: cmake --build build --config Release
+    
+    - name: Install to AppDir
+      run: |
+        cmake --install build --prefix AppDir/usr
+    
+    - name: Download linuxdeploy
+      run: |
+        wget https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
+        wget https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/continuous/linuxdeploy-plugin-qt-x86_64.AppImage
+        chmod +x linuxdeploy*.AppImage
+    
+    - name: Create AppImage
+      run: |
+        export QMAKE=$Qt6_DIR/bin/qmake
+        ./linuxdeploy-x86_64.AppImage --appdir AppDir \
+          --plugin qt \
+          --output appimage
+        mv ${{ env.APP_NAME }}-*.AppImage ${{ env.APP_NAME }}-Linux.AppImage
+    
+    - name: Upload artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: linux-appimage
+        path: ${{ env.APP_NAME }}-Linux.AppImage
+    
+    - name: Upload to release
+      if: startsWith(github.ref, 'refs/tags/')
+      uses: softprops/action-gh-release@v1
+      with:
+        files: ${{ env.APP_NAME }}-Linux.AppImage
+        token: ${{ secrets.GITHUB_TOKEN }}

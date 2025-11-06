@@ -1,0 +1,29 @@
+1
+00:00:02,500 --> 00:00:04,800
+This is the first subtitle
+Testing subtitle editor
+
+2
+00:00:05,800 --> 00:00:08,200
+Second subtitle
+Supports time shift function
+
+3
+00:00:09,000 --> 00:00:12,500
+Third subtitle
+Supports point sync function
+
+4
+00:00:14,000 --> 00:00:17,200
+Fourth subtitle
+Can scroll to view all subtitles
+
+5
+00:00:19,500 --> 00:00:23,000
+Fifth subtitle
+Can directly edit time and text
+
+6
+00:00:25,000 --> 00:00:28,500
+Sixth subtitle
+Complete SRT editing functionality
