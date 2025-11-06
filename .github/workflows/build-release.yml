@@ -11,8 +11,8 @@ env:
 
 jobs:
   build-macos:
-    name: Build macOS
-    runs-on: macos-latest
+    name: Build macOS Universal
+    runs-on: macos-13  # 使用 Intel 机器来构建
     
     steps:
     - name: Checkout code
@@ -28,32 +28,82 @@ jobs:
         modules: 'qtbase qttools'
         cache: true
     
-    - name: Configure CMake
+    - name: Configure and Build for x86_64 (Intel)
       run: |
-        cmake -B build -S . \
+        cmake -B build-x86_64 -S . \
           -DCMAKE_BUILD_TYPE=Release \
+          -DCMAKE_OSX_ARCHITECTURES=x86_64 \
           -DCMAKE_OSX_DEPLOYMENT_TARGET=10.15 \
           -DCMAKE_PREFIX_PATH=$Qt6_DIR
+        cmake --build build-x86_64 --config Release
     
-    - name: Build
-      run: cmake --build build --config Release
+    - name: Configure and Build for arm64 (Apple Silicon)
+      run: |
+        cmake -B build-arm64 -S . \
+          -DCMAKE_BUILD_TYPE=Release \
+          -DCMAKE_OSX_ARCHITECTURES=arm64 \
+          -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0 \
+          -DCMAKE_PREFIX_PATH=$Qt6_DIR
+        cmake --build build-arm64 --config Release
+    
+    - name: Create Universal Binary
+      run: |
+        # 创建目标目录
+        mkdir -p build-universal/${{ env.APP_NAME }}.app/Contents/MacOS
+        
+        # 复制 app 结构（从 x86_64 版本）
+        cp -R build-x86_64/${{ env.APP_NAME }}.app/* build-universal/${{ env.APP_NAME }}.app/
+        
+        # 使用 lipo 合并二进制文件
+        lipo -create \
+          build-x86_64/${{ env.APP_NAME }}.app/Contents/MacOS/${{ env.APP_NAME }} \
+          build-arm64/${{ env.APP_NAME }}.app/Contents/MacOS/${{ env.APP_NAME }} \
+          -output build-universal/${{ env.APP_NAME }}.app/Contents/MacOS/${{ env.APP_NAME }}
+        
+        # 验证 Universal Binary
+        echo "=== Universal Binary Info ==="
+        lipo -info build-universal/${{ env.APP_NAME }}.app/Contents/MacOS/${{ env.APP_NAME }}
+        file build-universal/${{ env.APP_NAME }}.app/Contents/MacOS/${{ env.APP_NAME }}
     
     - name: Deploy Qt dependencies
       run: |
-        macdeployqt build/${{ env.APP_NAME }}.app -dmg
-        mv build/${{ env.APP_NAME }}.dmg ${{ env.APP_NAME }}-macOS.dmg
+        # 使用 macdeployqt 部署 Qt 框架
+        macdeployqt build-universal/${{ env.APP_NAME }}.app -always-overwrite -verbose=2
+        
+        # 手动复制 QtDBus（macdeployqt 经常遗漏这个）
+        QTDBUS_SOURCE="$Qt6_DIR/lib/QtDBus.framework"
+        QTDBUS_TARGET="build-universal/${{ env.APP_NAME }}.app/Contents/Frameworks/QtDBus.framework"
+        
+        if [ -d "$QTDBUS_SOURCE" ] && [ ! -d "$QTDBUS_TARGET" ]; then
+          echo "手动复制 QtDBus 框架..."
+          cp -R "$QTDBUS_SOURCE" "$QTDBUS_TARGET"
+          
+          # 修复依赖路径
+          install_name_tool -id "@rpath/QtDBus.framework/Versions/A/QtDBus" \
+            "$QTDBUS_TARGET/Versions/A/QtDBus" || true
+          install_name_tool -change "$Qt6_DIR/lib/QtCore.framework/Versions/A/QtCore" \
+            "@rpath/QtCore.framework/Versions/A/QtCore" \
+            "$QTDBUS_TARGET/Versions/A/QtDBus" || true
+        fi
+        
+        # 重新签名（包含新添加的框架）
+        codesign --force --deep --sign - build-universal/${{ env.APP_NAME }}.app
+        
+        # 创建 DMG
+        macdeployqt build-universal/${{ env.APP_NAME }}.app -dmg
+        mv build-universal/${{ env.APP_NAME }}.dmg ${{ env.APP_NAME }}-macOS-Universal.dmg
     
     - name: Upload artifact
       uses: actions/upload-artifact@v4
       with:
-        name: macos-dmg
-        path: ${{ env.APP_NAME }}-macOS.dmg
+        name: macos-universal-dmg
+        path: ${{ env.APP_NAME }}-macOS-Universal.dmg
     
     - name: Upload to release
       if: startsWith(github.ref, 'refs/tags/')
       uses: softprops/action-gh-release@v1
       with:
-        files: ${{ env.APP_NAME }}-macOS.dmg
+        files: ${{ env.APP_NAME }}-macOS-Universal.dmg
         token: ${{ secrets.GITHUB_TOKEN }}
 
   build-windows:
