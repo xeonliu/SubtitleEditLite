@@ -6,6 +6,10 @@
 #include <QStringDecoder>
 #include <QStringConverter>
 
+#ifdef Q_OS_WIN
+#include <qt_windows.h>
+#endif
+
 namespace {
 
 QStringDecoder createDecoderForEncoding(SubtitleEncoding encoding) {
@@ -24,6 +28,59 @@ QStringDecoder createDecoderForEncoding(SubtitleEncoding encoding) {
 }
 
 }
+#ifdef Q_OS_WIN
+
+QString decodeWithCodePage(const QByteArray& data, UINT codePage, bool& ok) {
+    ok = false;
+    if (data.isEmpty()) {
+        ok = true;
+        return QString();
+    }
+    
+    int wideSize = MultiByteToWideChar(codePage,
+                                       MB_ERR_INVALID_CHARS,
+                                       data.constData(),
+                                       data.size(),
+                                       nullptr,
+                                       0);
+    if (wideSize <= 0) {
+        return QString();
+    }
+    
+    QString result(wideSize, Qt::Uninitialized);
+    int converted = MultiByteToWideChar(codePage,
+                                        MB_ERR_INVALID_CHARS,
+                                        data.constData(),
+                                        data.size(),
+                                        reinterpret_cast<wchar_t*>(result.data()),
+                                        wideSize);
+    if (converted != wideSize) {
+        return QString();
+    }
+    
+    ok = true;
+    return result;
+}
+
+QString decodeGbkWithWin32(const QByteArray& data, bool& ok) {
+    bool success = false;
+    QString text = decodeWithCodePage(data, 54936 /* GB18030 */, success);
+    if (success) {
+        ok = true;
+        return text;
+    }
+    
+    text = decodeWithCodePage(data, 936 /* GBK */, success);
+    if (success) {
+        ok = true;
+        return text;
+    }
+    
+    ok = false;
+    return QString();
+}
+
+#endif // Q_OS_WIN
 
 bool SRTParser::parse(const QString& filePath,
                       QVector<SubtitleItem>& subtitles,
@@ -40,16 +97,31 @@ bool SRTParser::parse(const QString& filePath,
     QByteArray rawData = file.readAll();
     file.close();
     
+    QString content;
     QStringDecoder decoder = createDecoderForEncoding(encoding);
-    if (!decoder.isValid()) {
+    if (decoder.isValid()) {
+        content = decoder.decode(rawData);
+        if (decoder.hasError()) {
+            errorMsg = "解码字幕内容时出错，请确认文件编码";
+            return false;
+        }
+    } else {
+#ifdef Q_OS_WIN
+        if (encoding == SubtitleEncoding::Gbk) {
+            bool winOk = false;
+            content = decodeGbkWithWin32(rawData, winOk);
+            if (!winOk) {
+                errorMsg = "当前系统不支持GBK/GB18030编码，请确认Windows区域和语言设置";
+                return false;
+            }
+        } else {
+            errorMsg = "当前Qt环境不支持所选编码（可能缺少ICU支持）";
+            return false;
+        }
+#else
         errorMsg = "当前Qt环境不支持所选编码（可能缺少ICU支持）";
         return false;
-    }
-    
-    QString content = decoder.decode(rawData);
-    if (decoder.hasError()) {
-        errorMsg = "解码字幕内容时出错，请确认文件编码";
-        return false;
+#endif
     }
     
     // 按空行分割字幕块
