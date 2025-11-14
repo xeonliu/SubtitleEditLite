@@ -2,8 +2,33 @@
 #include <QFile>
 #include <QTextStream>
 #include <QRegularExpression>
+#include <QByteArray>
+#include <QStringDecoder>
+#include <QStringConverter>
 
-bool SRTParser::parse(const QString& filePath, QVector<SubtitleItem>& subtitles, QString& errorMsg) {
+namespace {
+
+QStringDecoder createDecoderForEncoding(SubtitleEncoding encoding) {
+    switch (encoding) {
+    case SubtitleEncoding::Utf8:
+        return QStringDecoder(QStringConverter::Utf8);
+    case SubtitleEncoding::Gbk: {
+        QStringDecoder decoder("GB18030");
+        if (decoder.isValid()) {
+            return decoder;
+        }
+        return QStringDecoder("GBK");
+    }
+    }
+    return QStringDecoder();
+}
+
+}
+
+bool SRTParser::parse(const QString& filePath,
+                      QVector<SubtitleItem>& subtitles,
+                      QString& errorMsg,
+                      SubtitleEncoding encoding) {
     subtitles.clear();
     
     QFile file(filePath);
@@ -12,11 +37,20 @@ bool SRTParser::parse(const QString& filePath, QVector<SubtitleItem>& subtitles,
         return false;
     }
     
-    QTextStream in(&file);
-    in.setEncoding(QStringConverter::Utf8);
-    
-    QString content = in.readAll();
+    QByteArray rawData = file.readAll();
     file.close();
+    
+    QStringDecoder decoder = createDecoderForEncoding(encoding);
+    if (!decoder.isValid()) {
+        errorMsg = "当前Qt环境不支持所选编码（可能缺少ICU支持）";
+        return false;
+    }
+    
+    QString content = decoder.decode(rawData);
+    if (decoder.hasError()) {
+        errorMsg = "解码字幕内容时出错，请确认文件编码";
+        return false;
+    }
     
     // 按空行分割字幕块
     QStringList blocks = content.split(QRegularExpression("\\n\\s*\\n"), Qt::SkipEmptyParts);

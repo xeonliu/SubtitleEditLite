@@ -5,6 +5,11 @@
 #include <QTime>
 #include <QVector>
 
+enum class SubtitleEncoding {
+    Utf8,
+    Gbk
+};
+
 struct SubtitleItem {
     int index;
     QTime startTime;
@@ -24,7 +29,10 @@ struct SubtitleItem {
 class SRTParser {
 public:
     // 解析SRT文件
-    static bool parse(const QString& filePath, QVector<SubtitleItem>& subtitles, QString& errorMsg);
+    static bool parse(const QString& filePath,
+                      QVector<SubtitleItem>& subtitles,
+                      QString& errorMsg,
+                      SubtitleEncoding encoding = SubtitleEncoding::Utf8);
     
     // 保存为SRT文件
     static bool save(const QString& filePath, const QVector<SubtitleItem>& subtitles, QString& errorMsg);

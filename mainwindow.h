@@ -41,12 +41,14 @@ private:
     QStandardItemModel* m_tableModel;
     QString m_currentFilePath;
     bool m_modified;
+    SubtitleEncoding m_currentEncoding;
     
     // 辅助函数
-    void loadSubtitles(const QString& filePath);
+    void loadSubtitles(const QString& filePath, SubtitleEncoding encoding);
     void saveSubtitles(const QString& filePath);
     void updateTableView();
     void setModified(bool modified);
     void updateWindowTitle();
+    bool promptEncodingSelection(SubtitleEncoding& encoding);
 };
 #endif // MAINWINDOW_H

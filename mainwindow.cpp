@@ -14,12 +14,28 @@
 #include <QDialogButtonBox>
 #include <QGroupBox>
 #include <QFileInfo>
+#include <QStringList>
+
+namespace {
+
+QString encodingDisplayName(SubtitleEncoding encoding) {
+    switch (encoding) {
+    case SubtitleEncoding::Utf8:
+        return "UTF-8";
+    case SubtitleEncoding::Gbk:
+        return "GBK";
+    }
+    return "未知";
+}
+
+}
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
     , ui(new Ui::MainWindow)
     , m_tableModel(new QStandardItemModel(this))
     , m_modified(false)
+    , m_currentEncoding(SubtitleEncoding::Utf8)
 {
     ui->setupUi(this);
     
@@ -56,7 +72,12 @@ void MainWindow::onOpenFile() {
     QString filePath = QFileDialog::getOpenFileName(this, "打开SRT文件", "", "SRT文件 (*.srt);;所有文件 (*)");
     if (filePath.isEmpty()) return;
     
-    loadSubtitles(filePath);
+    SubtitleEncoding encoding = m_currentEncoding;
+    if (!promptEncodingSelection(encoding)) {
+        return;
+    }
+    
+    loadSubtitles(filePath, encoding);
 }
 
 void MainWindow::onSaveFile() {
@@ -176,17 +197,20 @@ void MainWindow::onSelectionChanged() {
     // 可以在此处添加选中行的处理逻辑
 }
 
-void MainWindow::loadSubtitles(const QString& filePath) {
+void MainWindow::loadSubtitles(const QString& filePath, SubtitleEncoding encoding) {
     QString errorMsg;
-    if (!SRTParser::parse(filePath, m_subtitles, errorMsg)) {
+    if (!SRTParser::parse(filePath, m_subtitles, errorMsg, encoding)) {
         QMessageBox::critical(this, "错误", "无法加载文件：\n" + errorMsg);
         return;
     }
     
     m_currentFilePath = filePath;
+    m_currentEncoding = encoding;
     updateTableView();
     setModified(false);
-    ui->statusbar->showMessage(QString("已加载 %1 条字幕").arg(m_subtitles.size()), 3000);
+    ui->statusbar->showMessage(
+        QString("已加载 %1 条字幕（编码：%2）").arg(m_subtitles.size()).arg(encodingDisplayName(encoding)),
+        3000);
 }
 
 void MainWindow::saveSubtitles(const QString& filePath) {
@@ -238,4 +262,17 @@ void MainWindow::updateWindowTitle() {
         title += " *";
     }
     setWindowTitle(title);
+}
+
+bool MainWindow::promptEncodingSelection(SubtitleEncoding& encoding) {
+    QStringList options = {"UTF-8", "GBK"};
+    int defaultIndex = (encoding == SubtitleEncoding::Gbk) ? 1 : 0;
+    bool ok = false;
+    QString choice = QInputDialog::getItem(this, "选择编码", "请选择字幕文件编码：", options, defaultIndex, false, &ok);
+    if (!ok) {
+        return false;
+    }
+    
+    encoding = (choice == "GBK") ? SubtitleEncoding::Gbk : SubtitleEncoding::Utf8;
+    return true;
 }
