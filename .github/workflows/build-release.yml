@@ -27,11 +27,85 @@ jobs:
         arch: 'clang_64'
         cache: true
     
+    - name: Check Qt encoding support
+      run: |
+        # 创建测试程序检查编码支持
+        cat > test_encodings.cpp << 'EOF'
+        #include <QCoreApplication>
+        #include <QStringConverter>
+        #include <QDebug>
+        #include <iostream>
+        
+        int main() {
+            auto codecs = QStringConverter::availableCodecs();
+            std::cout << "=== Available Codecs ===" << std::endl;
+            bool hasGBK = false;
+            bool hasSystem = false;
+            
+            for (const auto &codec : codecs) {
+                std::cout << codec.toStdString() << std::endl;
+                if (codec.contains("GBK", Qt::CaseInsensitive) || 
+                    codec.contains("936", Qt::CaseInsensitive)) {
+                    hasGBK = true;
+                    std::cout << "*** GBK SUPPORT FOUND: " << codec.toStdString() << " ***" << std::endl;
+                }
+                if (codec.contains("System", Qt::CaseInsensitive)) {
+                    hasSystem = true;
+                    std::cout << "*** System SUPPORT FOUND: " << codec.toStdString() << " ***" << std::endl;
+                }
+            }
+            
+            std::cout << std::endl;
+            std::cout << "GBK Support: " << (hasGBK ? "YES" : "NO") << std::endl;
+            std::cout << "System Support: " << (hasSystem ? "YES" : "NO") << std::endl;
+            
+            return 0;
+        }
+        EOF
+        
+        # 编译并运行测试
+        qmake -project "CONFIG += console"
+        qmake CONFIG+=release
+        make
+        ./test_encodings
+    
+    - name: Install GNU libiconv for GBK support
+      run: |
+        brew install libiconv
+        echo "LIBICONV_PATH=$(brew --prefix libiconv)" >> $GITHUB_ENV
+    
     - name: Make package script executable
       run: chmod +x package_macos.sh
     
     - name: Build and package using local script
-      run: ./package_macos.sh
+      run: |
+        # Build and package
+        ./package_macos.sh
+        
+        # Copy libiconv to app bundle for GBK support
+        if [ -f "${LIBICONV_PATH}/lib/libiconv.dylib" ]; then
+          echo "Copying libiconv to app bundle..."
+          cp "${LIBICONV_PATH}/lib/libiconv.dylib" build/${{ env.APP_NAME }}.app/Contents/Frameworks/
+          
+          # Fix the library path
+          install_name_tool -change "${LIBICONV_PATH}/lib/libiconv.dylib" \
+            "@executable_path/../Frameworks/libiconv.dylib" \
+            build/${{ env.APP_NAME }}.app/Contents/MacOS/${{ env.APP_NAME }}
+          
+          echo "libiconv packaged successfully"
+        else
+          echo "Warning: libiconv not found at ${LIBICONV_PATH}/lib/libiconv.dylib"
+        fi
+    
+    - name: Verify libiconv in bundle
+      run: |
+        echo "Checking if libiconv is properly packaged..."
+        if [ -f "build/${{ env.APP_NAME }}.app/Contents/Frameworks/libiconv.dylib" ]; then
+          echo "✓ libiconv.dylib found in bundle"
+          otool -L "build/${{ env.APP_NAME }}.app/Contents/MacOS/${{ env.APP_NAME }}" | grep libiconv || echo "libiconv not linked"
+        else
+          echo "✗ libiconv.dylib not found in bundle"
+        fi
     
     - name: Upload artifact
       uses: actions/upload-artifact@v4
@@ -66,8 +140,64 @@ jobs:
     - name: Setup MSVC
       uses: microsoft/setup-msbuild@v1.3
     
+    - name: Check Qt encoding support
+      run: |
+        # 创建测试程序检查编码支持
+        cat > test_encodings.cpp << 'EOF'
+        #include <QCoreApplication>
+        #include <QStringConverter>
+        #include <QDebug>
+        #include <iostream>
+        
+        int main() {
+            auto codecs = QStringConverter::availableCodecs();
+            std::cout << "=== Available Codecs ===" << std::endl;
+            bool hasGBK = false;
+            bool hasSystem = false;
+            
+            for (const auto &codec : codecs) {
+                std::cout << codec.toStdString() << std::endl;
+                if (codec.contains("GBK", Qt::CaseInsensitive) || 
+                    codec.contains("936", Qt::CaseInsensitive)) {
+                    hasGBK = true;
+                    std::cout << "*** GBK SUPPORT FOUND: " << codec.toStdString() << " ***" << std::endl;
+                }
+                if (codec.contains("System", Qt::CaseInsensitive)) {
+                    hasSystem = true;
+                    std::cout << "*** System SUPPORT FOUND: " << codec.toStdString() << " ***" << std::endl;
+                }
+            }
+            
+            std::cout << std::endl;
+            std::cout << "GBK Support: " << (hasGBK ? "YES" : "NO") << std::endl;
+            std::cout << "System Support: " << (hasSystem ? "YES" : "NO") << std::endl;
+            
+            return 0;
+        }
+        EOF
+        
+        # 编译并运行测试
+        qmake -project "CONFIG += console"
+        qmake CONFIG+=release
+        nmake
+        .\release\test_encodings.exe
+    
+    - name: Set Windows locale for GBK support
+      run: |
+        # 设置系统代码页为 GBK
+        chcp 936
+        echo "Setting locale for GBK support..."
+        echo "LC_ALL=zh_CN.GBK" >> $env:GITHUB_ENV
+        echo "LANG=zh_CN.GBK" >> $env:GITHUB_ENV
+    
     - name: Build and package using local script
-      run: .\package_windows.bat
+      run: |
+        # 设置环境变量
+        $env:LC_ALL = "zh_CN.GBK"
+        $env:LANG = "zh_CN.GBK"
+        
+        # 构建和打包
+        .\package_windows.bat
     
     - name: Upload portable artifact
       uses: actions/upload-artifact@v4
