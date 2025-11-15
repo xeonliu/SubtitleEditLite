@@ -18,6 +18,14 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
     
+    - name: Cache Qt
+      uses: actions/cache@v4
+      with:
+        path: ~/Qt
+        key: ${{ runner.os }}-qt-6.6-${{ hashFiles('**/CMakeLists.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-qt-6.6-
+    
     - name: Install Qt
       uses: jurplel/install-qt-action@v3
       with:
@@ -25,49 +33,7 @@ jobs:
         host: 'mac'
         target: 'desktop'
         arch: 'clang_64'
-        cache: true
-    
-    - name: Check Qt encoding support
-      run: |
-        # 创建测试程序检查编码支持
-        cat > test_encodings.cpp << 'EOF'
-        #include <QCoreApplication>
-        #include <QStringConverter>
-        #include <QDebug>
-        #include <iostream>
-        
-        int main() {
-            auto codecs = QStringConverter::availableCodecs();
-            std::cout << "=== Available Codecs ===" << std::endl;
-            bool hasGBK = false;
-            bool hasSystem = false;
-            
-            for (const auto &codec : codecs) {
-                std::cout << codec.toStdString() << std::endl;
-                if (codec.contains("GBK", Qt::CaseInsensitive) || 
-                    codec.contains("936", Qt::CaseInsensitive)) {
-                    hasGBK = true;
-                    std::cout << "*** GBK SUPPORT FOUND: " << codec.toStdString() << " ***" << std::endl;
-                }
-                if (codec.contains("System", Qt::CaseInsensitive)) {
-                    hasSystem = true;
-                    std::cout << "*** System SUPPORT FOUND: " << codec.toStdString() << " ***" << std::endl;
-                }
-            }
-            
-            std::cout << std::endl;
-            std::cout << "GBK Support: " << (hasGBK ? "YES" : "NO") << std::endl;
-            std::cout << "System Support: " << (hasSystem ? "YES" : "NO") << std::endl;
-            
-            return 0;
-        }
-        EOF
-        
-        # 编译并运行测试
-        qmake -project "CONFIG += console"
-        qmake CONFIG+=release
-        make
-        ./test_encodings
+        cache: false
     
     - name: Install GNU libiconv for GBK support
       run: |
@@ -128,6 +94,14 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
     
+    - name: Cache Qt
+      uses: actions/cache@v4
+      with:
+        path: ~/Qt
+        key: ${{ runner.os }}-qt-6.6-${{ hashFiles('**/CMakeLists.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-qt-6.6-
+    
     - name: Install Qt
       uses: jurplel/install-qt-action@v3
       with:
@@ -135,68 +109,33 @@ jobs:
         host: 'windows'
         target: 'desktop'
         arch: 'win64_msvc2019_64'
-        cache: true
+        cache: false
     
     - name: Setup MSVC
       uses: microsoft/setup-msbuild@v1.3
     
-    - name: Check Qt encoding support
-      run: |
-        # 创建测试程序检查编码支持
-        cat > test_encodings.cpp << 'EOF'
-        #include <QCoreApplication>
-        #include <QStringConverter>
-        #include <QDebug>
-        #include <iostream>
-        
-        int main() {
-            auto codecs = QStringConverter::availableCodecs();
-            std::cout << "=== Available Codecs ===" << std::endl;
-            bool hasGBK = false;
-            bool hasSystem = false;
-            
-            for (const auto &codec : codecs) {
-                std::cout << codec.toStdString() << std::endl;
-                if (codec.contains("GBK", Qt::CaseInsensitive) || 
-                    codec.contains("936", Qt::CaseInsensitive)) {
-                    hasGBK = true;
-                    std::cout << "*** GBK SUPPORT FOUND: " << codec.toStdString() << " ***" << std::endl;
-                }
-                if (codec.contains("System", Qt::CaseInsensitive)) {
-                    hasSystem = true;
-                    std::cout << "*** System SUPPORT FOUND: " << codec.toStdString() << " ***" << std::endl;
-                }
-            }
-            
-            std::cout << std::endl;
-            std::cout << "GBK Support: " << (hasGBK ? "YES" : "NO") << std::endl;
-            std::cout << "System Support: " << (hasSystem ? "YES" : "NO") << std::endl;
-            
-            return 0;
-        }
-        EOF
-        
-        # 编译并运行测试
-        qmake -project "CONFIG += console"
-        qmake CONFIG+=release
-        nmake
-        .\release\test_encodings.exe
+    - name: Setup MSVC Environment
+      uses: ilammy/msvc-dev-cmd@v1
+      with:
+        arch: x64
     
     - name: Set Windows locale for GBK support
+      shell: cmd
       run: |
-        # 设置系统代码页为 GBK
+        rem 设置系统代码页为 GBK
         chcp 936
-        echo "Setting locale for GBK support..."
-        echo "LC_ALL=zh_CN.GBK" >> $env:GITHUB_ENV
-        echo "LANG=zh_CN.GBK" >> $env:GITHUB_ENV
+        echo Setting locale for GBK support...
+        set LC_ALL=zh_CN.GBK
+        set LANG=zh_CN.GBK
     
     - name: Build and package using local script
+      shell: cmd
       run: |
-        # 设置环境变量
-        $env:LC_ALL = "zh_CN.GBK"
-        $env:LANG = "zh_CN.GBK"
+        rem 设置环境变量
+        set LC_ALL=zh_CN.GBK
+        set LANG=zh_CN.GBK
         
-        # 构建和打包
+        rem 构建和打包
         .\package_windows.bat
     
     - name: Upload portable artifact
@@ -220,6 +159,14 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
     
+    - name: Cache Qt
+      uses: actions/cache@v4
+      with:
+        path: ~/Qt
+        key: ${{ runner.os }}-qt-6.6-${{ hashFiles('**/CMakeLists.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-qt-6.6-
+    
     - name: Install Qt
       uses: jurplel/install-qt-action@v3
       with:
@@ -227,7 +174,7 @@ jobs:
         host: 'linux'
         target: 'desktop'
         arch: 'gcc_64'
-        cache: true
+        cache: false
     
     - name: Install dependencies
       run: |
@@ -241,11 +188,58 @@ jobs:
         cmake -B build -S . \
           -DCMAKE_BUILD_TYPE=Release \
           -DCMAKE_INSTALL_PREFIX=/usr \
-          -DCMAKE_PREFIX_PATH=$Qt6_DIR
+          -DCMAKE_PREFIX_PATH=$Qt6_DIR \
+          -DQt6_DIR=$Qt6_DIR
         cmake --build build --config Release
     
     - name: Install to AppDir
       run: cmake --install build --prefix AppDir/usr
+    
+    - name: Create desktop file and icon
+      run: |
+        # 创建 desktop 文件
+        cat > com.subtitleeditapp.desktop << 'EOF'
+        [Desktop Entry]
+        Type=Application
+        Name=SubtitleEditApp
+        Name[zh_CN]=SRT字幕编辑器
+        Comment=A simple SRT subtitle editor
+        Comment[zh_CN]=简单的SRT字幕编辑器
+        Exec=SubtitleEditApp
+        Icon=com.subtitleeditapp
+        Categories=AudioVideo;Video;
+        Terminal=false
+        MimeType=application/x-subrip;text/x-srt;
+        EOF
+        
+        # 创建简单的 SVG 图标
+        cat > icon.svg << 'EOF'
+        <?xml version="1.0" encoding="UTF-8"?>
+        <svg width="64" height="64" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+          <rect width="64" height="64" fill="#2196F3" rx="8"/>
+          <text x="32" y="20" font-family="Arial, sans-serif" font-size="8" fill="white" text-anchor="middle">SRT</text>
+          <rect x="8" y="28" width="48" height="4" fill="white" rx="2"/>
+          <rect x="8" y="36" width="48" height="4" fill="white" rx="2"/>
+          <rect x="8" y="44" width="48" height="4" fill="white" rx="2"/>
+          <rect x="8" y="52" width="32" height="4" fill="white" rx="2"/>
+        </svg>
+        EOF
+    
+    - name: Copy desktop file and icon
+      run: |
+        # 创建所需目录
+        mkdir -p AppDir/usr/share/applications/
+        mkdir -p AppDir/usr/share/icons/hicolor/64x64/apps/
+        
+        # 复制 desktop 文件
+        cp com.subtitleeditapp.desktop AppDir/usr/share/applications/
+        
+        # 复制图标
+        cp icon.svg AppDir/usr/share/icons/hicolor/64x64/apps/com.subtitleeditapp.svg
+        
+        # 创建 AppDir 根目录的符号链接
+        ln -sf usr/share/applications/com.subtitleeditapp.desktop AppDir/
+        ln -sf usr/share/icons/hicolor/64x64/apps/com.subtitleeditapp.svg AppDir/
     
     - name: Download linuxdeploy
       run: |
